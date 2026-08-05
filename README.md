@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-# 🔥 USA Wildfire Tracker
-=======
 # 🔥 USA Fire Tracker
->>>>>>> 8394705f883f51c3053d372020f8d232418d49d5
 
 Live web map tracking active fire hotspots and perimeters across USA.
 
