@@ -345,16 +345,68 @@ function setBasemap(mode) {
   currentBM = mode;
   document.querySelectorAll('.bm-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('bm-' + mode).classList.add('active');
-  const center = map.getCenter(), zoom = map.getZoom();
+  document.body.classList.toggle('light-map', mode === 'light');
+
+  // Save camera + current toggle states before wiping style
+  const center = map.getCenter();
+  const zoom   = map.getZoom();
+  const togHS  = document.getElementById('tog-hotspots').checked;
+  const togPer = document.getElementById('tog-perimeters').checked;
+  const togAQI = document.getElementById('tog-aqi').checked;
+
   map.setStyle(buildStyle(mode));
+
+  // style.load fires once the new basemap tiles are ready — re-add everything
   map.once('style.load', () => {
-    if (hotspotsData)   upsert('hotspots',   hotspotsData);
-    if (perimetersData) upsert('perimeters', perimetersData);
-    if (aqiData)        upsert('aqi',        aqiData);
-    setupLayers();
+    // Re-add sources (setStyle wiped them all)
+    if (hotspotsData)   map.addSource('hotspots',   { type:'geojson', data: hotspotsData });
+    if (perimetersData) map.addSource('perimeters', { type:'geojson', data: perimetersData });
+    if (aqiData)        map.addSource('aqi',        { type:'geojson', data: aqiData });
+
+    // Re-add layers unconditionally (they were wiped too)
+    addAllLayers();
+
+    // Restore toggle visibility states
+    setVis(['hotspots-halo','hotspots-core'],  togHS);
+    setVis(['perimeter-fill','perimeter-line'], togPer);
+    setVis(['aqi-squares'],                    togAQI);
+
     map.jumpTo({ center, zoom });
   });
-  document.body.classList.toggle('light-map', mode === 'light');
+}
+
+// Add all data layers fresh (used both on boot and after basemap swap)
+function addAllLayers() {
+  map.addLayer({ id:'perimeter-fill', type:'fill', source:'perimeters',
+    paint:{ 'fill-color':'#ff5c1a','fill-opacity':0.12 } });
+  map.addLayer({ id:'perimeter-line', type:'line', source:'perimeters',
+    paint:{ 'line-color':'#ff8c42','line-width':1.5,'line-opacity':0.8 } });
+  map.addLayer({ id:'aqi-squares', type:'circle', source:'aqi',
+    paint:{
+      'circle-radius':10,
+      'circle-color':['interpolate',['linear'],['get','aqi'],
+        0,'#00e400',50,'#00e400',51,'#ffff00',100,'#ffff00',
+        101,'#ff7e00',150,'#ff7e00',151,'#ff0000',200,'#ff0000',
+        201,'#8f3f97',300,'#8f3f97',301,'#7e0023'],
+      'circle-opacity':0.85,'circle-stroke-width':1.5,
+      'circle-stroke-color':'rgba(255,255,255,0.25)'
+    }
+  });
+  map.addLayer({ id:'hotspots-halo', type:'circle', source:'hotspots',
+    paint:{
+      'circle-radius':['interpolate',['linear'],['get','frp'],0,8,10,12,50,18,150,26],
+      'circle-color':'#ff5c1a','circle-opacity':0.08,'circle-blur':1
+    }
+  });
+  map.addLayer({ id:'hotspots-core', type:'circle', source:'hotspots',
+    paint:{
+      'circle-radius':['interpolate',['linear'],['get','frp'],0,3,10,4.5,50,6.5,150,9],
+      'circle-color':['interpolate',['linear'],['get','frp'],
+        0,'#ff9933',10,'#ff5c1a',50,'#ff1a1a',150,'#ffffff'],
+      'circle-opacity':0.9,'circle-stroke-width':0.5,
+      'circle-stroke-color':'rgba(255,255,255,0.2)'
+    }
+  });
 }
 
 // ── AQI helpers ────────────────────────────────────────────────────────────────
@@ -442,7 +494,8 @@ async function fetchPerimeters() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (d.features?.length) {
-        console.log('[NIFC direct] success:', d.features.length, 'fires');
+        d.features = normalizePerimeters(d.features);
+        console.log('[NIFC direct] success:', d.features.length, 'fires, first:', d.features[0]?.properties?.IncidentName);
         showSourceBadge(`Perimeters: NIFC direct ✓ (${d.features.length} fires)`);
         return d;
       }
@@ -478,41 +531,9 @@ function upsert(id, data) {
   else map.addSource(id, { type:'geojson', data });
 }
 
+// Called once on first boot — guards against double-add
 function setupLayers() {
-  if (!map.getLayer('perimeter-fill')) {
-    map.addLayer({ id:'perimeter-fill', type:'fill', source:'perimeters',
-      paint:{ 'fill-color':'#ff5c1a','fill-opacity':0.12 } });
-    map.addLayer({ id:'perimeter-line', type:'line', source:'perimeters',
-      paint:{ 'line-color':'#ff8c42','line-width':1.5,'line-opacity':0.8 } });
-  }
-  if (!map.getLayer('aqi-squares')) {
-    map.addLayer({ id:'aqi-squares', type:'circle', source:'aqi',
-      paint:{
-        'circle-radius':10,
-        'circle-color':['interpolate',['linear'],['get','aqi'],
-          0,'#00e400',50,'#00e400',51,'#ffff00',100,'#ffff00',
-          101,'#ff7e00',150,'#ff7e00',151,'#ff0000',200,'#ff0000',
-          201,'#8f3f97',300,'#8f3f97',301,'#7e0023'],
-        'circle-opacity':0.85,'circle-stroke-width':1.5,'circle-stroke-color':'rgba(255,255,255,0.25)'
-      }
-    });
-  }
-  if (!map.getLayer('hotspots-halo')) {
-    map.addLayer({ id:'hotspots-halo', type:'circle', source:'hotspots',
-      paint:{
-        'circle-radius':['interpolate',['linear'],['get','frp'],0,8,10,12,50,18,150,26],
-        'circle-color':'#ff5c1a','circle-opacity':0.08,'circle-blur':1
-      }
-    });
-    map.addLayer({ id:'hotspots-core', type:'circle', source:'hotspots',
-      paint:{
-        'circle-radius':['interpolate',['linear'],['get','frp'],0,3,10,4.5,50,6.5,150,9],
-        'circle-color':['interpolate',['linear'],['get','frp'],
-          0,'#ff9933',10,'#ff5c1a',50,'#ff1a1a',150,'#ffffff'],
-        'circle-opacity':0.9,'circle-stroke-width':0.5,'circle-stroke-color':'rgba(255,255,255,0.2)'
-      }
-    });
-  }
+  if (!map.getLayer('perimeter-fill')) addAllLayers();
 }
 
 // ── Fire list ──────────────────────────────────────────────────────────────────
