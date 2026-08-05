@@ -292,10 +292,32 @@ const REFRESH_MS = 60 * 60 * 1000;
 const FIRMS_KEY  = 'e35aa43361f5c16d78b16ffa92cef668';
 
 // ── Direct browser URLs (CORS-enabled, bypass Vercel proxy) ──────────────────
+const NIFC_FIELDS = 'attr_IncidentName,poly_GISAcres,attr_PercentContained,attr_ModifiedOnDateTime_dt,attr_POOState,attr_IncidentSize';
 const NIFC_URLS = [
-  'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&f=geojson&resultRecordCount=200',
-  'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YearToDate/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&f=geojson&resultRecordCount=200',
+  // Correct field: attr_POOState (not POOState)
+  `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=attr_POOState%3D%27US-OR%27&outFields=${NIFC_FIELDS}&f=geojson&resultRecordCount=200`,
+  // Spatial bbox fallback — no state filter needed, covers Oregon bbox
+  `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=1%3D1&geometry=-124.7%2C41.9%2C-116.4%2C46.3&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=${NIFC_FIELDS}&f=geojson&resultRecordCount=200`,
+  // YTD with correct field
+  `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YearToDate/FeatureServer/0/query?where=attr_POOState%3D%27US-OR%27&outFields=${NIFC_FIELDS}&f=geojson&resultRecordCount=200`,
 ];
+
+// Normalize attr_/poly_ prefixed fields to consistent property names
+function normalizePerimeters(features) {
+  return features.map(f => {
+    const p = f.properties || {};
+    return {
+      ...f,
+      properties: {
+        IncidentName:          p.attr_IncidentName    || p.poly_IncidentName    || p.IncidentName    || null,
+        GISAcres:              p.poly_GISAcres         || p.attr_IncidentSize    || p.GISAcres         || null,
+        PercentContained:      p.attr_PercentContained ?? p.PercentContained ?? null,
+        ModifiedOnDateTime_dt: p.attr_ModifiedOnDateTime_dt || p.ModifiedOnDateTime_dt || null,
+        POOState:              p.attr_POOState         || p.POOState             || null,
+      }
+    };
+  });
+}
 
 const FIRMS_URL = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${FIRMS_KEY}/VIIRS_SNPP_NRT/-124.7,41.9,-116.4,46.3/1`;
 
@@ -405,7 +427,11 @@ async function fetchPerimeters() {
     setLoadingMsg('Fetching fire perimeters via server…');
     const r = await fetch(`${API}/api/perimeters`, { signal: AbortSignal.timeout(9000) });
     const d = await r.json();
-    if (d.features?.length) { console.log('[NIFC] proxy success:', d.features.length); return d; }
+    if (d.features?.length) {
+      d.features = normalizePerimeters(d.features);
+      console.log('[NIFC] proxy success:', d.features.length, 'first:', d.features[0]?.properties?.IncidentName);
+      return d;
+    }
   } catch(_) {}
 
   // 2. Fetch NIFC directly from browser — CORS is enabled on arcgis.com
