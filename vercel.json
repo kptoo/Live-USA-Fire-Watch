@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "rootDirectory": "wildfire-tracker",
+  "rewrites": [
+    { "source": "/api/hotspots",   "destination": "/api/hotspots" },
+    { "source": "/api/perimeters", "destination": "/api/perimeters" },
+    { "source": "/api/aqi",        "destination": "/api/aqi" },
+    { "source": "/(.*)",           "destination": "/public/index.html" }
+  ]
+}
