@@ -1,6 +1,6 @@
-# 🔥 Oregon Wildfire Tracker
+# 🔥 USA Wildfire Tracker
 
-Live web map tracking active fire hotspots and perimeters across Oregon.
+Live web map tracking active fire hotspots and perimeters across USA.
 
 **Data sources:**
 - **NASA FIRMS** — VIIRS SNPP satellite hotspots, updated every ~3–12h
