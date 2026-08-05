@@ -63,8 +63,10 @@
     #search-clear:hover{color:var(--text);}
     #locate-btn{background:none;border-left:1px solid var(--border);color:var(--smoke);cursor:pointer;padding:9px 12px;font-size:10px;flex-shrink:0;transition:color .15s;font-family:var(--font-mono);white-space:nowrap;}
     #locate-btn:hover{color:var(--ember);}
+    #locate-btn.spin{animation:rotate .8s linear infinite;}
+    @keyframes rotate{to{transform:rotate(360deg);}}
 
-    /* Suggestions */
+    /* Suggestions dropdown */
     #search-suggestions{position:absolute;top:calc(100% + 5px);left:0;right:0;background:rgba(18,18,20,.98);border:1px solid var(--border);border-radius:6px;overflow:hidden;display:none;z-index:20;backdrop-filter:blur(12px);}
     .sg-item{padding:10px 14px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);transition:background .12s;display:flex;align-items:flex-start;gap:9px;}
     .sg-item:last-child{border-bottom:none;}
@@ -73,7 +75,7 @@
     .sg-name{color:var(--text);font-weight:500;}
     .sg-detail{color:var(--smoke);font-size:10px;margin-top:1px;}
 
-    /* Location card */
+    /* Location result card */
     #location-card{position:absolute;top:calc(100% + 5px);left:0;right:0;background:rgba(18,18,20,.98);border:1px solid var(--border);border-radius:6px;padding:14px;display:none;z-index:20;backdrop-filter:blur(12px);}
     .lc-title{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ember);margin-bottom:10px;}
     .lc-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:7px;}
@@ -118,7 +120,7 @@
     .legend-row:last-child{margin-bottom:0;}
     .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
     .legend-sq{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
-    #fire-list{max-height:220px;overflow-y:auto;}
+    #fire-list{max-height:200px;overflow-y:auto;}
     #fire-list::-webkit-scrollbar{width:4px;}
     #fire-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
     .fire-item{padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;}
@@ -152,9 +154,6 @@
 
     /* User location dot */
     .user-dot{width:14px;height:14px;background:#4dabf7;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 4px rgba(77,171,247,.3);}
-
-    /* Data source badge */
-    #source-badge{position:absolute;bottom:50px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:.06em;background:rgba(14,14,15,.8);padding:4px 12px;border-radius:20px;border:1px solid var(--border);white-space:nowrap;z-index:4;}
 
     /* Bottom bar */
     #bottom-bar{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:.06em;background:rgba(14,14,15,.8);padding:5px 14px;border-radius:20px;border:1px solid var(--border);white-space:nowrap;}
@@ -194,8 +193,8 @@
 <div id="map">
   <div id="loading">
     <div class="loading-icon">🔥</div>
-    <div class="loading-text">FETCHING LIVE FIRE DATA</div>
-    <div class="loading-sub" id="loading-sub">Connecting to NASA FIRMS · NIFC · AirNow…</div>
+    <div class="loading-text">FETCHING FIRE DATA</div>
+    <div class="loading-sub">NASA FIRMS · NIFC · AirNow…</div>
   </div>
 
   <!-- Search -->
@@ -282,61 +281,34 @@
     </div>
   </div>
 
-  <div id="source-badge" style="display:none"></div>
-  <div id="bottom-bar">NASA FIRMS · NIFC Perimeters · AirNow AQI · Auto-refresh 1h</div>
+  <div id="bottom-bar">Sources: NASA FIRMS (VIIRS SNPP 24h) · NIFC Perimeters · AirNow AQI · Auto-refresh: 1h</div>
 </div>
 
 <script>
-const API        = '';
+const API = '';
 const REFRESH_MS = 60 * 60 * 1000;
-const FIRMS_KEY  = 'e35aa43361f5c16d78b16ffa92cef668';
 
-// ── Direct browser URLs (CORS-enabled, bypass Vercel proxy) ──────────────────
-const NIFC_FIELDS = 'attr_IncidentName,poly_GISAcres,attr_PercentContained,attr_ModifiedOnDateTime_dt,attr_POOState,attr_IncidentSize';
-const NIFC_URLS = [
-  // Correct field: attr_POOState (not POOState)
-  `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=attr_POOState%3D%27US-OR%27&outFields=${NIFC_FIELDS}&f=geojson&resultRecordCount=200`,
-  // Spatial bbox fallback — no state filter needed, covers Oregon bbox
-  `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=1%3D1&geometry=-124.7%2C41.9%2C-116.4%2C46.3&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=${NIFC_FIELDS}&f=geojson&resultRecordCount=200`,
-  // YTD with correct field
-  `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YearToDate/FeatureServer/0/query?where=attr_POOState%3D%27US-OR%27&outFields=${NIFC_FIELDS}&f=geojson&resultRecordCount=200`,
-];
-
-// Normalize attr_/poly_ prefixed fields to consistent property names
-function normalizePerimeters(features) {
-  return features.map(f => {
-    const p = f.properties || {};
-    return {
-      ...f,
-      properties: {
-        IncidentName:          p.attr_IncidentName    || p.poly_IncidentName    || p.IncidentName    || null,
-        GISAcres:              p.poly_GISAcres         || p.attr_IncidentSize    || p.GISAcres         || null,
-        PercentContained:      p.attr_PercentContained ?? p.PercentContained ?? null,
-        ModifiedOnDateTime_dt: p.attr_ModifiedOnDateTime_dt || p.ModifiedOnDateTime_dt || null,
-        POOState:              p.attr_POOState         || p.POOState             || null,
-      }
-    };
-  });
-}
-
-const FIRMS_URL = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${FIRMS_KEY}/VIIRS_SNPP_NRT/-124.7,41.9,-116.4,46.3/1`;
-
-// ── Basemap config ─────────────────────────────────────────────────────────────
+// ── Basemap config ────────────────────────────────────────────────────────────
 const BM = {
-  dark:      { tile:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',      attr:'© OpenStreetMap', bmax:0.18, sat:-0.7,  con:0.2  },
-  light:     { tile:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',      attr:'© OpenStreetMap', bmax:1.0,  sat:-0.15, con:0.05 },
-  satellite: { tile:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr:'© Esri, Maxar', bmax:0.9, sat:0.1, con:0.1 }
+  dark:      { tile:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+               attr:'© OpenStreetMap', bmax:0.18, sat:-0.7,  con:0.2  },
+  light:     { tile:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+               attr:'© OpenStreetMap', bmax:1.0,  sat:-0.15, con:0.05 },
+  satellite: { tile:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+               attr:'© Esri, Maxar',   bmax:0.9,  sat:0.1,   con:0.1  }
 };
+
 let currentBM = 'dark';
 
 function buildStyle(mode) {
   const b = BM[mode];
   return {
-    version:8,
-    glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-    sources:{ basemap:{ type:'raster', tiles:[b.tile], tileSize:256, attribution:b.attr } },
-    layers: [{ id:'basemap', type:'raster', source:'basemap',
-               paint:{'raster-brightness-min':0,'raster-brightness-max':b.bmax,'raster-saturation':b.sat,'raster-contrast':b.con} }]
+    version: 8,
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+    sources: { basemap: { type:'raster', tiles:[b.tile], tileSize:256, attribution:b.attr } },
+    layers:  [{ id:'basemap', type:'raster', source:'basemap',
+                paint:{ 'raster-brightness-min':0,'raster-brightness-max':b.bmax,
+                        'raster-saturation':b.sat,'raster-contrast':b.con } }]
   };
 }
 
@@ -347,70 +319,24 @@ function setBasemap(mode) {
   document.getElementById('bm-' + mode).classList.add('active');
   document.body.classList.toggle('light-map', mode === 'light');
 
-  const center = map.getCenter();
-  const zoom   = map.getZoom();
-  const togHS  = document.getElementById('tog-hotspots').checked;
-  const togPer = document.getElementById('tog-perimeters').checked;
-  const togAQI = document.getElementById('tog-aqi').checked;
+  const b = BM[mode];
 
-  map.setStyle(buildStyle(mode));
-
-  map.once('style.load', () => {
-    // setTimeout(0) ensures the style internals are fully settled before we touch sources/layers
-    setTimeout(() => {
-      try {
-        if (hotspotsData)   map.addSource('hotspots',   { type:'geojson', data: hotspotsData });
-        if (perimetersData) map.addSource('perimeters', { type:'geojson', data: perimetersData });
-        if (aqiData)        map.addSource('aqi',        { type:'geojson', data: aqiData });
-      } catch(e) { console.warn('[basemap] source add error:', e.message); }
-      try { addAllLayers(); } catch(e) { console.warn('[basemap] layer add error:', e.message); }
-      setVis(['hotspots-halo','hotspots-core'],  togHS);
-      setVis(['perimeter-fill','perimeter-line'], togPer);
-      setVis(['aqi-squares'],                    togAQI);
-      map.jumpTo({ center, zoom });
-    }, 0);
-  });
+  // Update raster tiles directly — NO setStyle() so data layers are NEVER wiped
+  const src = map.getSource('basemap');
+  if (src && src.setTiles) {
+    src.setTiles([b.tile]);
+  }
+  map.setPaintProperty('basemap', 'raster-brightness-min', 0);
+  map.setPaintProperty('basemap', 'raster-brightness-max', b.bmax);
+  map.setPaintProperty('basemap', 'raster-saturation',     b.sat);
+  map.setPaintProperty('basemap', 'raster-contrast',       b.con);
 }
 
-// Add all data layers fresh (used both on boot and after basemap swap)
-function addAllLayers() {
-  map.addLayer({ id:'perimeter-fill', type:'fill', source:'perimeters',
-    paint:{ 'fill-color':'#ff5c1a','fill-opacity':0.12 } });
-  map.addLayer({ id:'perimeter-line', type:'line', source:'perimeters',
-    paint:{ 'line-color':'#ff8c42','line-width':1.5,'line-opacity':0.8 } });
-  map.addLayer({ id:'aqi-squares', type:'circle', source:'aqi',
-    paint:{
-      'circle-radius':10,
-      'circle-color':['interpolate',['linear'],['get','aqi'],
-        0,'#00e400',50,'#00e400',51,'#ffff00',100,'#ffff00',
-        101,'#ff7e00',150,'#ff7e00',151,'#ff0000',200,'#ff0000',
-        201,'#8f3f97',300,'#8f3f97',301,'#7e0023'],
-      'circle-opacity':0.85,'circle-stroke-width':1.5,
-      'circle-stroke-color':'rgba(255,255,255,0.25)'
-    }
-  });
-  map.addLayer({ id:'hotspots-halo', type:'circle', source:'hotspots',
-    paint:{
-      'circle-radius':['interpolate',['linear'],['get','frp'],0,8,10,12,50,18,150,26],
-      'circle-color':'#ff5c1a','circle-opacity':0.08,'circle-blur':1
-    }
-  });
-  map.addLayer({ id:'hotspots-core', type:'circle', source:'hotspots',
-    paint:{
-      'circle-radius':['interpolate',['linear'],['get','frp'],0,3,10,4.5,50,6.5,150,9],
-      'circle-color':['interpolate',['linear'],['get','frp'],
-        0,'#ff9933',10,'#ff5c1a',50,'#ff1a1a',150,'#ffffff'],
-      'circle-opacity':0.9,'circle-stroke-width':0.5,
-      'circle-stroke-color':'rgba(255,255,255,0.2)'
-    }
-  });
-}
+// ── AQI helpers ───────────────────────────────────────────────────────────────
+function aqiColor(v){ if(v<=50)return'#00e400';if(v<=100)return'#ffff00';if(v<=150)return'#ff7e00';if(v<=200)return'#ff0000';if(v<=300)return'#8f3f97';return'#7e0023';}
+function aqiLabel(v){ if(v<=50)return'Good';if(v<=100)return'Moderate';if(v<=150)return'Unhealthy for Sensitive Groups';if(v<=200)return'Unhealthy';if(v<=300)return'Very Unhealthy';return'Hazardous';}
 
-// ── AQI helpers ────────────────────────────────────────────────────────────────
-function aqiColor(v){if(v<=50)return'#00e400';if(v<=100)return'#ffff00';if(v<=150)return'#ff7e00';if(v<=200)return'#ff0000';if(v<=300)return'#8f3f97';return'#7e0023';}
-function aqiLabel(v){if(v<=50)return'Good';if(v<=100)return'Moderate';if(v<=150)return'Unhealthy for Sensitive Groups';if(v<=200)return'Unhealthy';if(v<=300)return'Very Unhealthy';return'Hazardous';}
-
-// ── Map init ───────────────────────────────────────────────────────────────────
+// ── Map init ──────────────────────────────────────────────────────────────────
 const map = new maplibregl.Map({
   container:'map', style:buildStyle('dark'),
   center:[-120.5,44.0], zoom:6, minZoom:4, maxZoom:18
@@ -418,205 +344,95 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl(),'bottom-right');
 map.addControl(new maplibregl.ScaleControl({unit:'imperial'}),'bottom-right');
 
-// ── Data fetching ──────────────────────────────────────────────────────────────
+// ── Data ──────────────────────────────────────────────────────────────────────
 let hotspotsData, perimetersData, aqiData;
-
-function setLoadingMsg(msg) {
-  const el = document.getElementById('loading-sub');
-  if (el) el.textContent = msg;
-}
-
-function showSourceBadge(msg) {
-  const el = document.getElementById('source-badge');
-  if (el) { el.textContent = msg; el.style.display = 'block'; }
-}
-
-// Parse FIRMS CSV text → GeoJSON
-function parseFIRMScsv(text) {
-  const lines = text.trim().split('\n');
-  const header = lines[0].split(',');
-  const col = n => header.indexOf(n);
-  return lines.slice(1).flatMap(line => {
-    const f = line.split(',');
-    const lat = parseFloat(f[col('latitude')]);
-    const lon = parseFloat(f[col('longitude')]);
-    const frp = parseFloat(f[col('frp')]) || 0;
-    if (isNaN(lat) || isNaN(lon)) return [];
-    return [{ type:'Feature', geometry:{ type:'Point', coordinates:[lon,lat] },
-      properties:{ frp, confidence:f[col('confidence')]||'n',
-        acq_date:f[col('acq_date')]||'', acq_time:f[col('acq_time')]||'' } }];
-  });
-}
-
-async function fetchHotspots() {
-  // 1. Try Vercel proxy
-  try {
-    setLoadingMsg('Fetching hotspots via server…');
-    const r = await fetch(`${API}/api/hotspots`, { signal: AbortSignal.timeout(9000) });
-    const d = await r.json();
-    if (d.features?.length) { showSourceBadge('Hotspots: server proxy ✓'); return d; }
-  } catch(_) {}
-
-  // 2. Fetch FIRMS directly from browser
-  try {
-    setLoadingMsg('Fetching FIRMS hotspots directly…');
-    const r = await fetch(FIRMS_URL, { signal: AbortSignal.timeout(20000) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const text = await r.text();
-    const features = parseFIRMScsv(text);
-    if (features.length) { showSourceBadge('Hotspots: FIRMS direct ✓'); return { type:'FeatureCollection', features }; }
-  } catch(e) { console.warn('[FIRMS direct] failed:', e.message); }
-
-  return { type:'FeatureCollection', features:[] };
-}
-
-async function fetchPerimeters() {
-  // 1. Try Vercel proxy
-  try {
-    setLoadingMsg('Fetching fire perimeters via server…');
-    const r = await fetch(`${API}/api/perimeters`, { signal: AbortSignal.timeout(9000) });
-    const d = await r.json();
-    if (d.features?.length) {
-      d.features = normalizePerimeters(d.features);
-      console.log('[NIFC] proxy success:', d.features.length, 'first:', d.features[0]?.properties?.IncidentName);
-      return d;
-    }
-  } catch(_) {}
-
-  // 2. Fetch NIFC directly from browser — CORS is enabled on arcgis.com
-  for (const url of NIFC_URLS) {
-    try {
-      setLoadingMsg('Fetching NIFC perimeters directly…');
-      const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-      if (d.features?.length) {
-        d.features = normalizePerimeters(d.features);
-        console.log('[NIFC direct] success:', d.features.length, 'fires, first:', d.features[0]?.properties?.IncidentName);
-        showSourceBadge(`Perimeters: NIFC direct ✓ (${d.features.length} fires)`);
-        return d;
-      }
-    } catch(e) { console.warn('[NIFC direct] failed:', e.message); }
-  }
-
-  return { type:'FeatureCollection', features:[] };
-}
-
-async function fetchAQI() {
-  try {
-    const r = await fetch(`${API}/api/aqi`, { signal: AbortSignal.timeout(9000) });
-    return await r.json();
-  } catch(_) {
-    return { type:'FeatureCollection', features:[] };
-  }
-}
-
 async function loadAll() {
-  const [p, h, a] = await Promise.all([
-    fetchPerimeters(),
-    fetchHotspots(),
-    fetchAQI(),
+  const [hR,pR,aR] = await Promise.all([
+    fetch(`${API}/api/hotspots`), fetch(`${API}/api/perimeters`), fetch(`${API}/api/aqi`)
   ]);
-  perimetersData = p;
-  hotspotsData   = h;
-  aqiData        = a;
+  hotspotsData=await hR.json(); perimetersData=await pR.json(); aqiData=await aR.json();
 }
 
-// ── Map sources & layers ───────────────────────────────────────────────────────
-function upsert(id, data) {
-  if (map.getSource(id)) map.getSource(id).setData(data);
-  else map.addSource(id, { type:'geojson', data });
+function upsert(id,data){
+  if(map.getSource(id)) map.getSource(id).setData(data);
+  else map.addSource(id,{type:'geojson',data});
 }
 
-// Called once on first boot — guards against double-add
-function setupLayers() {
-  if (!map.getLayer('perimeter-fill')) addAllLayers();
-}
-
-// ── Fire list ──────────────────────────────────────────────────────────────────
-function buildFireList(data) {
-  const features = data?.features || [];
-  document.getElementById('fire-count').textContent = `(${features.length})`;
-  document.getElementById('stat-fires').textContent = features.length;
-  const list = document.getElementById('fire-list');
-  if (!features.length) {
-    list.innerHTML = '<div style="font-size:11px;color:var(--smoke)">No named perimeters returned</div>';
-    return;
+function setupLayers(){
+  if(!map.getLayer('perimeter-fill')){
+    map.addLayer({id:'perimeter-fill',type:'fill',source:'perimeters',paint:{'fill-color':'#ff5c1a','fill-opacity':0.12}});
+    map.addLayer({id:'perimeter-line',type:'line',source:'perimeters',paint:{'line-color':'#ff8c42','line-width':1.5,'line-opacity':0.8}});
   }
-  const sorted = [...features].sort((a,b)=>(b.properties?.GISAcres||0)-(a.properties?.GISAcres||0));
-  list.innerHTML = sorted.map((f,i) => {
-    const p = f.properties||{};
-    const nm = p.IncidentName || 'Unnamed';
-    const ac = p.GISAcres ? Math.round(p.GISAcres).toLocaleString() : '—';
-    const pct = p.PercentContained ?? null;
-    let badge = '';
-    if (pct !== null) {
-      const cls = pct>=75?'pct-low':pct>=25?'pct-mid':'pct-high';
-      badge = `<span class="fire-pct ${cls}">${pct}% CTD</span>`;
-    }
-    return `<div class="fire-item" data-idx="${i}">
-      <div class="fire-name">${nm}${badge}</div>
-      <div class="fire-meta">${ac} acres</div>
-    </div>`;
-  }).join('');
-  list.querySelectorAll('.fire-item').forEach(el =>
-    el.addEventListener('click', () => flyToFire(sorted[+el.dataset.idx]))
-  );
+  if(!map.getLayer('aqi-squares')){
+    map.addLayer({id:'aqi-squares',type:'circle',source:'aqi',
+      paint:{'circle-radius':10,
+        'circle-color':['interpolate',['linear'],['get','aqi'],
+          0,'#00e400',50,'#00e400',51,'#ffff00',100,'#ffff00',101,'#ff7e00',
+          150,'#ff7e00',151,'#ff0000',200,'#ff0000',201,'#8f3f97',300,'#8f3f97',301,'#7e0023'],
+        'circle-opacity':0.85,'circle-stroke-width':1.5,'circle-stroke-color':'rgba(255,255,255,0.25)'}});
+  }
+  if(!map.getLayer('hotspots-halo')){
+    map.addLayer({id:'hotspots-halo',type:'circle',source:'hotspots',
+      paint:{'circle-radius':['interpolate',['linear'],['get','frp'],0,8,10,12,50,18,150,26],
+             'circle-color':'#ff5c1a','circle-opacity':0.08,'circle-blur':1}});
+    map.addLayer({id:'hotspots-core',type:'circle',source:'hotspots',
+      paint:{'circle-radius':['interpolate',['linear'],['get','frp'],0,3,10,4.5,50,6.5,150,9],
+             'circle-color':['interpolate',['linear'],['get','frp'],0,'#ff9933',10,'#ff5c1a',50,'#ff1a1a',150,'#ffffff'],
+             'circle-opacity':0.9,'circle-stroke-width':0.5,'circle-stroke-color':'rgba(255,255,255,0.2)'}});
+  }
 }
 
-function updateStats() {
-  document.getElementById('stat-hotspots').textContent = hotspotsData?.features?.length ?? 0;
-  document.getElementById('stat-aqi').textContent      = aqiData?.features?.length ?? 0;
-  document.getElementById('stat-updated').textContent  =
-    new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-}
-
-// ── Search ─────────────────────────────────────────────────────────────────────
+// ── Search ────────────────────────────────────────────────────────────────────
 let debTimer=null, userMarker=null;
-const sInput = document.getElementById('search-input');
-const sClear = document.getElementById('search-clear');
-const sSugg  = document.getElementById('search-suggestions');
-const sCard  = document.getElementById('location-card');
+const sInput  = document.getElementById('search-input');
+const sClear  = document.getElementById('search-clear');
+const sSugg   = document.getElementById('search-suggestions');
+const sCard   = document.getElementById('location-card');
 
-sInput.addEventListener('input', () => {
-  const q = sInput.value.trim();
-  sClear.style.display = q ? 'block' : 'none';
-  sCard.style.display = 'none';
+sInput.addEventListener('input',()=>{
+  const q=sInput.value.trim();
+  sClear.style.display=q?'block':'none';
+  sCard.style.display='none';
   clearTimeout(debTimer);
-  if (q.length < 2) { sSugg.style.display='none'; return; }
-  debTimer = setTimeout(() => doSearch(q), 340);
+  if(q.length<2){sSugg.style.display='none';return;}
+  debTimer=setTimeout(()=>doSearch(q),340);
 });
-sClear.addEventListener('click', () => {
+
+sClear.addEventListener('click',()=>{
   sInput.value=''; sClear.style.display='none';
   sSugg.style.display='none'; sCard.style.display='none';
-  if (userMarker) { userMarker.remove(); userMarker=null; }
-});
-document.addEventListener('click', e => {
-  if (!document.getElementById('search-bar').contains(e.target)) sSugg.style.display='none';
+  if(userMarker){userMarker.remove();userMarker=null;}
 });
 
-async function doSearch(q) {
-  const fireHits = (perimetersData?.features||[])
-    .filter(f => f.properties?.IncidentName?.toLowerCase().includes(q.toLowerCase())).slice(0,3);
-  let geoHits = [];
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`,
-      { headers:{'Accept-Language':'en'} });
-    geoHits = await r.json();
-  } catch(_) {}
+document.addEventListener('click',e=>{
+  if(!document.getElementById('search-bar').contains(e.target)){sSugg.style.display='none';}
+});
+
+async function doSearch(q){
+  // Fire name matches (local, instant)
+  const fireHits=(perimetersData?.features||[])
+    .filter(f=>f.properties?.IncidentName?.toLowerCase().includes(q.toLowerCase())).slice(0,3);
+
+  // Nominatim geocode
+  let geoHits=[];
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`,
+                        {headers:{'Accept-Language':'en'}});
+    geoHits=await r.json();
+  }catch(_){}
+
   renderSuggestions(fireHits, geoHits);
 }
 
-function renderSuggestions(fires, geo) {
-  const items = [
-    ...fires.map(f => {
-      const p=f.properties, ac=p.GISAcres?Math.round(p.GISAcres).toLocaleString()+' ac':'';
-      const idx=(perimetersData.features||[]).indexOf(f);
-      return `<div class="sg-item" data-type="fire" data-idx="${idx}">
+function renderSuggestions(fires, geo){
+  const items=[
+    ...fires.map((f,i)=>{
+      const p=f.properties; const ac=p.GISAcres?Math.round(p.GISAcres).toLocaleString()+' ac':'';
+      return `<div class="sg-item" data-type="fire" data-idx="${(perimetersData.features||[]).indexOf(f)}">
         <span class="sg-icon">🔥</span>
         <div><div class="sg-name">${p.IncidentName}</div><div class="sg-detail">Active fire · ${ac}</div></div></div>`;
     }),
-    ...geo.slice(0,5).map(r => {
+    ...geo.slice(0,5).map(r=>{
       const name=r.display_name.split(',')[0];
       const det=r.display_name.split(',').slice(1,3).join(',').trim();
       return `<div class="sg-item" data-type="geo" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${name}">
@@ -624,15 +440,15 @@ function renderSuggestions(fires, geo) {
         <div><div class="sg-name">${name}</div><div class="sg-detail">${det}</div></div></div>`;
     })
   ];
-  if (!items.length) { sSugg.style.display='none'; return; }
-  sSugg.innerHTML = items.join('');
-  sSugg.style.display = 'block';
-  sSugg.querySelectorAll('.sg-item').forEach(el => {
-    el.addEventListener('click', () => {
+  if(!items.length){sSugg.style.display='none';return;}
+  sSugg.innerHTML=items.join('');
+  sSugg.style.display='block';
+  sSugg.querySelectorAll('.sg-item').forEach(el=>{
+    el.addEventListener('click',()=>{
       sSugg.style.display='none';
-      if (el.dataset.type==='fire') {
-        const f = perimetersData.features[+el.dataset.idx];
-        sInput.value = f.properties.IncidentName; sClear.style.display='block';
+      if(el.dataset.type==='fire'){
+        const f=perimetersData.features[+el.dataset.idx];
+        sInput.value=f.properties.IncidentName; sClear.style.display='block';
         flyToFire(f);
       } else {
         const lat=parseFloat(el.dataset.lat), lon=parseFloat(el.dataset.lon), nm=el.dataset.name;
@@ -643,6 +459,7 @@ function renderSuggestions(fires, geo) {
   });
 }
 
+// Haversine km
 function hav(la1,lo1,la2,lo2){
   const R=6371,dL=(la2-la1)*Math.PI/180,dO=(lo2-lo1)*Math.PI/180;
   const a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dO/2)**2;
@@ -663,9 +480,8 @@ function flyToFire(f){
   map.flyTo({center:[lon,lat],zoom:9,duration:900});
   placeMarker(lat,lon);
   const p=f.properties;
-  showCard(`📍 ${p.IncidentName||'Fire'}`,
-    `${Math.round(p.GISAcres||0).toLocaleString()} acres · ${p.PercentContained??'?'}% contained`,
-    lat, lon);
+  showCard(lat,lon,p.IncidentName,
+    `Active fire · ${Math.round(p.GISAcres||0).toLocaleString()} acres · ${p.PercentContained??'?'}% contained`);
 }
 
 function flyAndAnalyze(lat,lon,label){
@@ -675,11 +491,13 @@ function flyAndAnalyze(lat,lon,label){
 }
 
 function analyzeLocation(lat,lon,label){
+  // Nearest hotspot
   let nhDist=Infinity,nh=null;
   for(const f of (hotspotsData?.features||[])){
     const [flo,fla]=f.geometry.coordinates, d=hav(lat,lon,fla,flo);
     if(d<nhDist){nhDist=d;nh=f;}
   }
+  // Nearest fire perimeter
   let nfDist=Infinity,nf=null;
   for(const f of (perimetersData?.features||[])){
     const flat=(f.geometry?.coordinates||[]).flat(Infinity);
@@ -688,17 +506,20 @@ function analyzeLocation(lat,lon,label){
       if(d<nfDist){nfDist=d;nf=f;}
     }
   }
+  // Nearest AQI
   let naDist=Infinity,na=null;
   for(const f of (aqiData?.features||[])){
     const [flo,fla]=f.geometry.coordinates, d=hav(lat,lon,fla,flo);
     if(d<naDist){naDist=d;na=f;}
   }
-  const risk=(nhDist<10||nfDist<5)?['risk-hi','High Risk']
-            :(nhDist<30||nfDist<20)?['risk-mid','Moderate Risk']
-            :['risk-low','Low Risk'];
+
+  const risk = (nhDist<10||nfDist<5)?['risk-hi','High Risk']
+             : (nhDist<30||nfDist<20)?['risk-mid','Moderate Risk']
+             : ['risk-low','Low Risk'];
   const aqiVal=na?.properties?.aqi??null;
   const aqiStr=aqiVal!=null?`${aqiVal} — ${aqiLabel(aqiVal)}`:'No nearby station';
   const aqiSty=aqiVal!=null?`background:${aqiColor(aqiVal)};color:${aqiVal<=100?'#111':'#fff'}`:'';
+
   let html=`<div class="lc-title">📍 ${label}</div>`;
   html+=`<div class="lc-row"><span class="lc-key">Coordinates</span><span class="lc-val">${lat.toFixed(4)}, ${lon.toFixed(4)}</span></div>`;
   html+=`<hr class="lc-hr">`;
@@ -707,33 +528,39 @@ function analyzeLocation(lat,lon,label){
   html+=`<div class="lc-row"><span class="lc-key">Nearest Named Fire</span><span class="lc-val">${nf?nfDist.toFixed(1)+' km to '+nf.properties?.IncidentName:'None'}</span></div>`;
   html+=`<hr class="lc-hr">`;
   html+=`<div class="lc-row"><span class="lc-key">Air Quality</span><span class="lc-val">`;
-  html+=aqiSty?`<span class="lc-badge" style="${aqiSty}">${aqiStr}</span>`:aqiStr;
+  if(aqiSty) html+=`<span class="lc-badge" style="${aqiSty}">${aqiStr}</span>`;
+  else html+=aqiStr;
   html+=`</span></div>`;
-  sCard.innerHTML=html; sCard.style.display='block'; sSugg.style.display='none';
+  showCard(lat,lon,null,null,html);
 }
 
-function showCard(title,subtitle,lat,lon){
-  sCard.innerHTML=`<div class="lc-title">${title}</div>
-    <div class="lc-row"><span class="lc-key">Coordinates</span><span class="lc-val">${lat.toFixed(4)}, ${lon.toFixed(4)}</span></div>
-    <div class="lc-row"><span class="lc-key">Info</span><span class="lc-val">${subtitle}</span></div>`;
+function showCard(lat,lon,title,subtitle,rawHtml){
+  if(rawHtml){ sCard.innerHTML=rawHtml; }
+  else {
+    let h=`<div class="lc-title">📍 ${title}</div>`;
+    h+=`<div class="lc-row"><span class="lc-key">Coordinates</span><span class="lc-val">${lat.toFixed(4)}, ${lon.toFixed(4)}</span></div>`;
+    if(subtitle) h+=`<div class="lc-row"><span class="lc-key">Info</span><span class="lc-val">${subtitle}</span></div>`;
+    sCard.innerHTML=h;
+  }
   sCard.style.display='block';
 }
 
+// ── Live location ─────────────────────────────────────────────────────────────
 function useMyLocation(){
-  if(!navigator.geolocation){alert('Geolocation not supported.');return;}
+  if(!navigator.geolocation){alert('Geolocation not supported by your browser.');return;}
   const btn=document.getElementById('locate-btn');
-  btn.textContent='⟳ Locating…';
+  btn.textContent='⟳ Locating…'; btn.classList.add('spin');
   navigator.geolocation.getCurrentPosition(
     pos=>{
-      btn.textContent='📍 My Location';
+      btn.textContent='📍 My Location'; btn.classList.remove('spin');
       const {latitude:lat,longitude:lon}=pos.coords;
       sInput.value='My Location'; sClear.style.display='block';
       flyAndAnalyze(lat,lon,'My Location');
     },
     err=>{
-      btn.textContent='📍 My Location';
-      const msgs={1:'Location access denied. Enable it in browser settings.',2:'Location unavailable.',3:'Request timed out.'};
-      alert(msgs[err.code]||'Could not get location.');
+      btn.textContent='📍 My Location'; btn.classList.remove('spin');
+      const msgs={1:'Location access denied. Enable it in browser settings.',2:'Location unavailable.',3:'Location request timed out.'};
+      alert(msgs[err.code]||'Could not get your location.');
     },
     {timeout:10000,enableHighAccuracy:true}
   );
@@ -758,7 +585,30 @@ function toggleAllSections(){
   updateCollapseBtn();
 }
 
-// ── Popups ─────────────────────────────────────────────────────────────────────
+// ── Fire list ─────────────────────────────────────────────────────────────────
+function buildFireList(data){
+  const features=data?.features||[];
+  document.getElementById('fire-count').textContent=`(${features.length})`;
+  document.getElementById('stat-fires').textContent=features.length;
+  const list=document.getElementById('fire-list');
+  if(!features.length){list.innerHTML='<div style="font-size:11px;color:var(--smoke)">No named perimeters</div>';return;}
+  const sorted=[...features].sort((a,b)=>(b.properties?.GISAcres||0)-(a.properties?.GISAcres||0));
+  list.innerHTML=sorted.map((f,i)=>{
+    const p=f.properties||{},nm=p.IncidentName||'Unnamed',ac=p.GISAcres?Math.round(p.GISAcres).toLocaleString():'—';
+    const pct=p.PercentContained??null;
+    let badge=pct!==null?`<span class="fire-pct ${pct>=75?'pct-low':pct>=25?'pct-mid':'pct-high'}">${pct}% CTD</span>`:'';
+    return `<div class="fire-item" data-idx="${i}"><div class="fire-name">${nm}${badge}</div><div class="fire-meta">${ac} acres</div></div>`;
+  }).join('');
+  list.querySelectorAll('.fire-item').forEach(el=>el.addEventListener('click',()=>flyToFire(sorted[+el.dataset.idx])));
+}
+
+function updateStats(){
+  document.getElementById('stat-hotspots').textContent=hotspotsData?.features?.length??0;
+  document.getElementById('stat-aqi').textContent=aqiData?.features?.length??0;
+  document.getElementById('stat-updated').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+
+// ── Popups ────────────────────────────────────────────────────────────────────
 const popup=new maplibregl.Popup({closeButton:true,offset:8,maxWidth:'250px'});
 map.on('click','hotspots-core',e=>{
   const p=e.features[0].properties,[lon,lat]=e.features[0].geometry.coordinates;
@@ -767,7 +617,7 @@ map.on('click','hotspots-core',e=>{
     <div class="popup-row"><span class="popup-key">FRP</span><span class="popup-val">${p.frp?p.frp.toFixed(1)+' MW':'—'}</span></div>
     <div class="popup-row"><span class="popup-key">Confidence</span><span class="popup-val">${p.confidence||'—'}</span></div>
     <div class="popup-row"><span class="popup-key">Detected</span><span class="popup-val">${p.acq_date||'—'} ${p.acq_time||''} UTC</span></div>
-    <div class="popup-row"><span class="popup-key">Source</span><span class="popup-val">NASA VIIRS SNPP</span></div>`).addTo(map);
+    <div class="popup-row"><span class="popup-key">Source</span><span class="popup-val">VIIRS SNPP</span></div>`).addTo(map);
 });
 map.on('click','perimeter-fill',e=>{
   const p=e.features[0]?.properties; if(!p)return;
@@ -775,12 +625,11 @@ map.on('click','perimeter-fill',e=>{
     <div class="popup-row"><span class="popup-key">Size</span><span class="popup-val">${p.GISAcres?Math.round(p.GISAcres).toLocaleString()+' ac':'—'}</span></div>
     <div class="popup-row"><span class="popup-key">Contained</span><span class="popup-val">${p.PercentContained!=null?p.PercentContained+'%':'—'}</span></div>
     <div class="popup-row"><span class="popup-key">Updated</span><span class="popup-val">${p.ModifiedOnDateTime_dt?new Date(p.ModifiedOnDateTime_dt).toLocaleDateString():'—'}</span></div>
-    <div class="popup-row"><span class="popup-key">Source</span><span class="popup-val">NIFC WFIGS</span></div>`).addTo(map);
+    <div class="popup-row"><span class="popup-key">Source</span><span class="popup-val">NIFC</span></div>`).addTo(map);
 });
 map.on('click','aqi-squares',e=>{
-  const p=e.features[0].properties, aqi=p.aqi||0, col=aqiColor(aqi);
-  let rows='';
-  try{const pol=typeof p.pollutants==='string'?JSON.parse(p.pollutants):p.pollutants;
+  const p=e.features[0].properties,aqi=p.aqi||0,col=aqiColor(aqi);
+  let rows=''; try{const pol=typeof p.pollutants==='string'?JSON.parse(p.pollutants):p.pollutants;
     rows=Object.entries(pol).map(([n,v])=>`<div class="popup-row"><span class="popup-key">${n}</span><span class="popup-val">AQI ${v.aqi}</span></div>`).join('');}catch(_){}
   popup.setLngLat(e.lngLat).setHTML(`<div class="popup-title">💨 ${p.city||'Station'}, ${p.state||''}</div>
     <div class="popup-row"><span class="popup-key">Overall AQI</span><span class="popup-val">${aqi}</span></div>${rows}
@@ -792,39 +641,28 @@ map.on('click','aqi-squares',e=>{
   map.on('mouseleave',id,()=>{map.getCanvas().style.cursor='';});
 });
 
-// ── Layer toggles ──────────────────────────────────────────────────────────────
+// ── Layer toggles ─────────────────────────────────────────────────────────────
 function setVis(ls,on){ls.forEach(id=>{if(map.getLayer(id))map.setLayoutProperty(id,'visibility',on?'visible':'none');});}
 document.getElementById('tog-hotspots').addEventListener('change',  e=>setVis(['hotspots-halo','hotspots-core'],e.target.checked));
 document.getElementById('tog-perimeters').addEventListener('change', e=>setVis(['perimeter-fill','perimeter-line'],e.target.checked));
 document.getElementById('tog-aqi').addEventListener('change',        e=>setVis(['aqi-squares'],e.target.checked));
 
-// ── Boot ───────────────────────────────────────────────────────────────────────
-map.on('load', async () => {
-  try {
+// ── Boot ──────────────────────────────────────────────────────────────────────
+map.on('load',async()=>{
+  try{
     await loadAll();
-    upsert('hotspots',   hotspotsData);
-    upsert('perimeters', perimetersData);
-    upsert('aqi',        aqiData);
-    setupLayers();
-    buildFireList(perimetersData);
-    updateStats();
-
+    upsert('hotspots',hotspotsData); upsert('perimeters',perimetersData); upsert('aqi',aqiData);
+    setupLayers(); buildFireList(perimetersData); updateStats();
     const ov=document.getElementById('loading');
-    ov.style.opacity='0';
-    setTimeout(()=>ov.remove(),500);
-
-    setInterval(async () => {
+    ov.style.opacity='0'; setTimeout(()=>ov.remove(),500);
+    setInterval(async()=>{
       await loadAll();
-      upsert('hotspots',   hotspotsData);
-      upsert('perimeters', perimetersData);
-      upsert('aqi',        aqiData);
-      buildFireList(perimetersData);
-      updateStats();
-    }, REFRESH_MS);
-  } catch(err) {
-    document.querySelector('.loading-text').textContent = 'FETCH ERROR';
-    document.querySelector('.loading-sub').textContent  = err.message;
-    console.error(err);
+      upsert('hotspots',hotspotsData); upsert('perimeters',perimetersData); upsert('aqi',aqiData);
+      buildFireList(perimetersData); updateStats();
+    },REFRESH_MS);
+  }catch(err){
+    document.querySelector('.loading-text').textContent='FETCH ERROR';
+    document.querySelector('.loading-sub').textContent=err.message;
   }
 });
 </script>
