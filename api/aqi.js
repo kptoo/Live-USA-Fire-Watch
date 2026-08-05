@@ -35,6 +35,7 @@ export default async function handler(req, res) {
     cacheTs = Date.now();
     res.json(cache);
   } catch(e) {
+    console.warn('AirNow failed:', e.message);
     res.json({ type:'FeatureCollection', features:[] });
   }
 }

@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { mockHotspots } from './mock-data.js';
 
 const FIRMS_KEY = process.env.FIRMS_KEY || 'e35aa43361f5c16d78b16ffa92cef668';
 const BBOX = '-124.7,41.9,-116.4,46.3';
@@ -27,11 +28,12 @@ export default async function handler(req, res) {
         properties:{ frp, confidence:f[col('confidence')]||'n',
           acq_date:f[col('acq_date')]||'', acq_time:f[col('acq_time')]||'' } }];
     });
+    if (!features.length) throw new Error('empty');
     cache = { type:'FeatureCollection', features };
     cacheTs = Date.now();
     res.json(cache);
   } catch(e) {
-    // fallback: return empty so map still loads
-    res.json({ type:'FeatureCollection', features:[] });
+    console.warn('FIRMS failed, using mock:', e.message);
+    res.json(mockHotspots);
   }
 }

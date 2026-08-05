@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { mockPerimeters } from './mock-data.js';
 
 const URL = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/' +
   'WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?' +
@@ -14,10 +15,14 @@ export default async function handler(req, res) {
   try {
     const r = await fetch(URL, { signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    cache = await r.json();
+    const data = await r.json();
+    // If NIFC returns empty features, fall back to mock
+    if (!data.features?.length) throw new Error('empty response');
+    cache = data;
     cacheTs = Date.now();
     res.json(cache);
   } catch(e) {
-    res.json({ type:'FeatureCollection', features:[] });
+    console.warn('NIFC failed, using mock:', e.message);
+    res.json(mockPerimeters);
   }
 }
