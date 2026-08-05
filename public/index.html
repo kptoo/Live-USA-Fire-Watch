@@ -347,7 +347,6 @@ function setBasemap(mode) {
   document.getElementById('bm-' + mode).classList.add('active');
   document.body.classList.toggle('light-map', mode === 'light');
 
-  // Save camera + current toggle states before wiping style
   const center = map.getCenter();
   const zoom   = map.getZoom();
   const togHS  = document.getElementById('tog-hotspots').checked;
@@ -356,22 +355,20 @@ function setBasemap(mode) {
 
   map.setStyle(buildStyle(mode));
 
-  // style.load fires once the new basemap tiles are ready — re-add everything
   map.once('style.load', () => {
-    // Re-add sources (setStyle wiped them all)
-    if (hotspotsData)   map.addSource('hotspots',   { type:'geojson', data: hotspotsData });
-    if (perimetersData) map.addSource('perimeters', { type:'geojson', data: perimetersData });
-    if (aqiData)        map.addSource('aqi',        { type:'geojson', data: aqiData });
-
-    // Re-add layers unconditionally (they were wiped too)
-    addAllLayers();
-
-    // Restore toggle visibility states
-    setVis(['hotspots-halo','hotspots-core'],  togHS);
-    setVis(['perimeter-fill','perimeter-line'], togPer);
-    setVis(['aqi-squares'],                    togAQI);
-
-    map.jumpTo({ center, zoom });
+    // setTimeout(0) ensures the style internals are fully settled before we touch sources/layers
+    setTimeout(() => {
+      try {
+        if (hotspotsData)   map.addSource('hotspots',   { type:'geojson', data: hotspotsData });
+        if (perimetersData) map.addSource('perimeters', { type:'geojson', data: perimetersData });
+        if (aqiData)        map.addSource('aqi',        { type:'geojson', data: aqiData });
+      } catch(e) { console.warn('[basemap] source add error:', e.message); }
+      try { addAllLayers(); } catch(e) { console.warn('[basemap] layer add error:', e.message); }
+      setVis(['hotspots-halo','hotspots-core'],  togHS);
+      setVis(['perimeter-fill','perimeter-line'], togPer);
+      setVis(['aqi-squares'],                    togAQI);
+      map.jumpTo({ center, zoom });
+    }, 0);
   });
 }
 
