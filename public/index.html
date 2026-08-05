@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Oregon Wildfire Tracker</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    :root {
+      --bg:        #0d0d0e;
+      --surface:   #141416;
+      --surface2:  #1c1c1f;
+      --border:    #2a2a2e;
+      --ember:     #ff5c1a;
+      --ember-glo: #ff8c42;
+      --smoke:     #8a8a92;
+      --smoke-lt:  #c2c2cc;
+      --text:      #e8e8ec;
+      --text-dim:  #6b6b75;
+      --green:     #3ddc84;
+      --yellow:    #ffd84d;
+      --red:       #ff4d4d;
+      --purple:    #b060ff;
+      --font-mono: 'JetBrains Mono','Fira Mono','Cascadia Code',monospace;
+      --font-ui:   'Inter',system-ui,sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+
+    /* Header */
+    #header{display:flex;align-items:center;gap:12px;padding:9px 18px;background:var(--surface);border-bottom:1px solid var(--border);z-index:10;flex-shrink:0;}
+    .logo{display:flex;align-items:center;gap:8px;}
+    .logo-icon{font-size:22px;}
+    .logo-text{font-family:var(--font-mono);font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ember);}
+    .logo-sub{font-family:var(--font-mono);font-size:10px;color:var(--smoke);letter-spacing:.08em;}
+    .header-stats{display:flex;gap:20px;margin-left:auto;}
+    .stat-chip{display:flex;flex-direction:column;align-items:flex-end;}
+    .stat-chip .label{font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);}
+    .stat-chip .value{font-family:var(--font-mono);font-size:15px;font-weight:700;color:var(--ember);}
+    .stat-chip .value.ok{color:var(--green);}
+    .live-pill{display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(255,92,26,.12);border:1px solid rgba(255,92,26,.3);border-radius:20px;font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;color:var(--ember);}
+    .live-dot{width:6px;height:6px;background:var(--ember);border-radius:50%;animation:blink 1.6s ease-in-out infinite;}
+    @keyframes blink{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.7);}}
+
+    /* Basemap buttons */
+    .basemap-btns{display:flex;gap:4px;}
+    .bm-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:var(--surface2);color:var(--smoke-lt);font-family:var(--font-mono);font-size:10px;cursor:pointer;transition:all .18s;white-space:nowrap;}
+    .bm-btn:hover{border-color:var(--smoke);color:var(--text);}
+    .bm-btn.active{background:rgba(255,92,26,.15);border-color:var(--ember);color:var(--ember);}
+
+    /* Map */
+    #map{flex:1;position:relative;}
+
+    /* Search bar */
+    #search-bar{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:6;width:440px;max-width:calc(100vw - 340px);}
+    #search-wrap{display:flex;align-items:center;background:rgba(20,20,22,.96);border:1px solid var(--border);border-radius:8px;backdrop-filter:blur(10px);position:relative;}
+    #search-wrap:focus-within{border-color:var(--ember);}
+    #search-icon{padding:0 10px;color:var(--smoke);font-size:15px;flex-shrink:0;}
+    #search-input{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:var(--font-ui);font-size:13px;padding:10px 4px;}
+    #search-input::placeholder{color:var(--text-dim);}
+    #search-clear{background:none;border:none;color:var(--smoke);cursor:pointer;padding:0 10px;font-size:15px;display:none;transition:color .15s;}
+    #search-clear:hover{color:var(--text);}
+    #locate-btn{background:none;border-left:1px solid var(--border);color:var(--smoke);cursor:pointer;padding:9px 12px;font-size:10px;flex-shrink:0;transition:color .15s;font-family:var(--font-mono);white-space:nowrap;}
+    #locate-btn:hover{color:var(--ember);}
+    #locate-btn.spin{animation:rotate .8s linear infinite;}
+    @keyframes rotate{to{transform:rotate(360deg);}}
+
+    /* Suggestions dropdown */
+    #search-suggestions{position:absolute;top:calc(100% + 5px);left:0;right:0;background:rgba(18,18,20,.98);border:1px solid var(--border);border-radius:6px;overflow:hidden;display:none;z-index:20;backdrop-filter:blur(12px);}
+    .sg-item{padding:10px 14px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);transition:background .12s;display:flex;align-items:flex-start;gap:9px;}
+    .sg-item:last-child{border-bottom:none;}
+    .sg-item:hover{background:rgba(255,92,26,.08);}
+    .sg-icon{font-size:14px;flex-shrink:0;margin-top:1px;}
+    .sg-name{color:var(--text);font-weight:500;}
+    .sg-detail{color:var(--smoke);font-size:10px;margin-top:1px;}
+
+    /* Location result card */
+    #location-card{position:absolute;top:calc(100% + 5px);left:0;right:0;background:rgba(18,18,20,.98);border:1px solid var(--border);border-radius:6px;padding:14px;display:none;z-index:20;backdrop-filter:blur(12px);}
+    .lc-title{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ember);margin-bottom:10px;}
+    .lc-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:7px;}
+    .lc-key{color:var(--smoke);}
+    .lc-val{font-family:var(--font-mono);color:var(--text);text-align:right;}
+    .lc-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-family:var(--font-mono);font-size:11px;font-weight:700;}
+    .risk-low{background:rgba(61,220,132,.15);color:var(--green);border:1px solid rgba(61,220,132,.3);}
+    .risk-mid{background:rgba(255,216,77,.15);color:var(--yellow);border:1px solid rgba(255,216,77,.3);}
+    .risk-hi{background:rgba(255,77,77,.15);color:var(--red);border:1px solid rgba(255,77,77,.3);}
+    .lc-hr{border:none;border-top:1px solid var(--border);margin:8px 0;}
+
+    /* Panel */
+    #panel{position:absolute;top:16px;left:16px;width:280px;background:rgba(20,20,22,.94);border:1px solid var(--border);border-radius:8px;backdrop-filter:blur(10px);z-index:5;overflow:hidden;max-height:calc(100vh - 100px);display:flex;flex-direction:column;}
+    #panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+    #panel-title{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ember);}
+    #panel-toggle-btn{background:none;border:1px solid var(--border);border-radius:4px;color:var(--smoke);cursor:pointer;font-size:10px;padding:2px 7px;transition:all .15s;font-family:var(--font-mono);}
+    #panel-toggle-btn:hover{border-color:var(--smoke);color:var(--text);}
+    #panel-body{overflow-y:auto;flex:1;}
+    #panel-body::-webkit-scrollbar{width:3px;}
+    #panel-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+    .panel-section{border-bottom:1px solid var(--border);}
+    .panel-section:last-child{border-bottom:none;}
+    .section-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none;transition:background .15s;}
+    .section-header:hover{background:rgba(255,255,255,.03);}
+    .section-label{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-dim);}
+    .section-chevron{font-size:10px;color:var(--text-dim);transition:transform .22s ease;}
+    .section-chevron.open{transform:rotate(180deg);}
+    .section-body{overflow:hidden;transition:max-height .28s ease,opacity .22s ease;max-height:600px;opacity:1;}
+    .section-body.collapsed{max-height:0;opacity:0;}
+    .section-inner{padding:4px 14px 12px;}
+    .toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+    .toggle-row:last-child{margin-bottom:0;}
+    .toggle-label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--smoke-lt);}
+    .swatch{width:10px;height:10px;border-radius:2px;}
+    .toggle{position:relative;width:32px;height:17px;}
+    .toggle input{opacity:0;width:0;height:0;}
+    .toggle-track{position:absolute;inset:0;background:var(--border);border-radius:17px;cursor:pointer;transition:background .2s;}
+    .toggle-track::after{content:'';position:absolute;left:2px;top:2px;width:13px;height:13px;background:var(--smoke);border-radius:50%;transition:transform .2s,background .2s;}
+    .toggle input:checked+.toggle-track{background:rgba(255,92,26,.3);}
+    .toggle input:checked+.toggle-track::after{transform:translateX(15px);background:var(--ember);}
+    .legend-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px;color:var(--smoke-lt);}
+    .legend-row:last-child{margin-bottom:0;}
+    .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+    .legend-sq{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
+    #fire-list{max-height:200px;overflow-y:auto;}
+    #fire-list::-webkit-scrollbar{width:4px;}
+    #fire-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+    .fire-item{padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;}
+    .fire-item:last-child{border-bottom:none;}
+    .fire-item:hover .fire-name{color:var(--ember);}
+    .fire-name{font-size:11px;font-weight:600;color:var(--text);transition:color .15s;margin-bottom:3px;}
+    .fire-meta{font-family:var(--font-mono);font-size:10px;color:var(--smoke);}
+    .fire-pct{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-family:var(--font-mono);margin-left:6px;}
+    .pct-low{background:rgba(61,220,132,.15);color:var(--green);}
+    .pct-mid{background:rgba(255,216,77,.15);color:var(--yellow);}
+    .pct-high{background:rgba(255,77,77,.15);color:var(--red);}
+    #panel-contact{flex-shrink:0;border-top:1px solid var(--border);padding:10px 14px;display:flex;flex-direction:column;gap:4px;}
+    .contact-label{font-family:var(--font-mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-dim);margin-bottom:4px;}
+    .contact-row{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--smoke-lt);}
+    .contact-link{color:var(--smoke-lt);text-decoration:none;font-family:var(--font-mono);}
+    .contact-link:hover{color:var(--ember);}
+
+    /* Popups */
+    .maplibregl-popup-content{background:var(--surface)!important;border:1px solid var(--border)!important;border-radius:6px!important;padding:12px 14px!important;color:var(--text)!important;font-family:var(--font-ui)!important;box-shadow:0 4px 24px rgba(0,0,0,.6)!important;min-width:190px;}
+    .maplibregl-popup-tip{display:none!important;}
+    .maplibregl-popup-close-button{color:var(--smoke)!important;font-size:16px!important;right:8px!important;top:6px!important;}
+    .popup-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ember);margin-bottom:8px;}
+    .popup-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;}
+    .popup-key{color:var(--smoke);}
+    .popup-val{font-family:var(--font-mono);color:var(--text);}
+    .aqi-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-family:var(--font-mono);font-size:11px;font-weight:700;margin-top:6px;}
+    body.light-map .maplibregl-popup-content{background:#fff!important;border-color:#ddd!important;color:#111!important;}
+    body.light-map .popup-key{color:#666;}
+    body.light-map .popup-val{color:#111;}
+    body.light-map .popup-title{color:#cc3300;}
+
+    /* User location dot */
+    .user-dot{width:14px;height:14px;background:#4dabf7;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 4px rgba(77,171,247,.3);}
+
+    /* Bottom bar */
+    #bottom-bar{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:.06em;background:rgba(14,14,15,.8);padding:5px 14px;border-radius:20px;border:1px solid var(--border);white-space:nowrap;}
+
+    /* Loading */
+    #loading{position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;gap:16px;transition:opacity .5s;}
+    .loading-icon{font-size:40px;animation:flicker 1.2s ease-in-out infinite;}
+    @keyframes flicker{0%,100%{opacity:1;}50%{opacity:.5;}}
+    .loading-text{font-family:var(--font-mono);font-size:12px;letter-spacing:.12em;color:var(--ember);}
+    .loading-sub{font-family:var(--font-mono);font-size:10px;color:var(--smoke);}
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div class="logo">
+    <span class="logo-icon">🔥</span>
+    <div>
+      <div class="logo-text">Oregon Fire Watch</div>
+      <div class="logo-sub">VIIRS · NIFC · AIRNOW · LIVE</div>
+    </div>
+  </div>
+  <div class="live-pill"><div class="live-dot"></div>LIVE</div>
+  <div class="basemap-btns">
+    <button class="bm-btn active" id="bm-dark"      onclick="setBasemap('dark')">🌑 Dark</button>
+    <button class="bm-btn"        id="bm-light"     onclick="setBasemap('light')">🌤 Light</button>
+    <button class="bm-btn"        id="bm-satellite" onclick="setBasemap('satellite')">🛰 Satellite</button>
+  </div>
+  <div class="header-stats">
+    <div class="stat-chip"><span class="label">Hotspots</span><span class="value" id="stat-hotspots">—</span></div>
+    <div class="stat-chip"><span class="label">Fires</span><span class="value" id="stat-fires">—</span></div>
+    <div class="stat-chip"><span class="label">AQI Stations</span><span class="value" id="stat-aqi">—</span></div>
+    <div class="stat-chip"><span class="label">Updated</span><span class="value ok" id="stat-updated" style="font-size:11px">—</span></div>
+  </div>
+</div>
+
+<div id="map">
+  <div id="loading">
+    <div class="loading-icon">🔥</div>
+    <div class="loading-text">FETCHING FIRE DATA</div>
+    <div class="loading-sub">NASA FIRMS · NIFC · AirNow…</div>
+  </div>
+
+  <!-- Search -->
+  <div id="search-bar">
+    <div id="search-wrap">
+      <span id="search-icon">🔍</span>
+      <input id="search-input" type="text" placeholder="Search location or fire name…" autocomplete="off" />
+      <button id="search-clear" title="Clear">✕</button>
+      <button id="locate-btn" onclick="useMyLocation()">📍 My Location</button>
+    </div>
+    <div id="search-suggestions"></div>
+    <div id="location-card"></div>
+  </div>
+
+  <!-- Panel -->
+  <div id="panel">
+    <div id="panel-header">
+      <span id="panel-title">🔥 Controls</span>
+      <button id="panel-toggle-btn" onclick="toggleAllSections()">Collapse All</button>
+    </div>
+    <div id="panel-body">
+
+      <div class="panel-section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-label">Layers</span><span class="section-chevron open">▼</span>
+        </div>
+        <div class="section-body"><div class="section-inner">
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="swatch" style="background:#ff5c1a;border-radius:50%"></span>Hotspots (VIIRS 24h)</span>
+            <label class="toggle"><input type="checkbox" id="tog-hotspots" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="swatch" style="background:#ff8c42"></span>Fire Perimeters</span>
+            <label class="toggle"><input type="checkbox" id="tog-perimeters" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="swatch" style="background:#b060ff"></span>AQI Stations</span>
+            <label class="toggle"><input type="checkbox" id="tog-aqi" checked><span class="toggle-track"></span></label>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-label">FRP Intensity</span><span class="section-chevron open">▼</span>
+        </div>
+        <div class="section-body"><div class="section-inner">
+          <div class="legend-row"><span class="legend-dot" style="background:#ff9933"></span>&lt; 10 MW — Low</div>
+          <div class="legend-row"><span class="legend-dot" style="background:#ff5c1a"></span>10–50 MW — Moderate</div>
+          <div class="legend-row"><span class="legend-dot" style="background:#ff1a1a"></span>50–150 MW — High</div>
+          <div class="legend-row"><span class="legend-dot" style="background:#ffffff"></span>&gt; 150 MW — Extreme</div>
+        </div></div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-label">Air Quality (AQI)</span><span class="section-chevron open">▼</span>
+        </div>
+        <div class="section-body"><div class="section-inner">
+          <div class="legend-row"><span class="legend-sq" style="background:#00e400"></span>Good (0–50)</div>
+          <div class="legend-row"><span class="legend-sq" style="background:#ffff00"></span>Moderate (51–100)</div>
+          <div class="legend-row"><span class="legend-sq" style="background:#ff7e00"></span>Unhealthy for Sensitive (101–150)</div>
+          <div class="legend-row"><span class="legend-sq" style="background:#ff0000"></span>Unhealthy (151–200)</div>
+          <div class="legend-row"><span class="legend-sq" style="background:#8f3f97"></span>Very Unhealthy (201–300)</div>
+          <div class="legend-row"><span class="legend-sq" style="background:#7e0023"></span>Hazardous (301+)</div>
+        </div></div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-label">Active Fires <span id="fire-count" style="color:var(--ember)"></span></span>
+          <span class="section-chevron open">▼</span>
+        </div>
+        <div class="section-body"><div class="section-inner" style="padding-bottom:4px;">
+          <div id="fire-list"><div style="font-size:11px;color:var(--smoke)">Loading…</div></div>
+        </div></div>
+      </div>
+
+    </div>
+    <div id="panel-contact">
+      <div class="contact-label">Developer Contact</div>
+      <div class="contact-row"><span>✉️</span><a class="contact-link" href="mailto:winermmanuel@gmail.com">winermmanuel@gmail.com</a></div>
+      <div class="contact-row"><span>📞</span><a class="contact-link" href="tel:+254702743039">+254 702 743 039</a></div>
+    </div>
+  </div>
+
+  <div id="bottom-bar">Sources: NASA FIRMS (VIIRS SNPP 24h) · NIFC Perimeters · AirNow AQI · Auto-refresh: 1h</div>
+</div>
+
+<script>
+const API = '';
+const REFRESH_MS = 60 * 60 * 1000;
+
+// ── Basemap config ────────────────────────────────────────────────────────────
+const BM = {
+  dark:      { tile:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+               attr:'© OpenStreetMap', bmax:0.18, sat:-0.7,  con:0.2  },
+  light:     { tile:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+               attr:'© OpenStreetMap', bmax:1.0,  sat:-0.15, con:0.05 },
+  satellite: { tile:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+               attr:'© Esri, Maxar',   bmax:0.9,  sat:0.1,   con:0.1  }
+};
+
+let currentBM = 'dark';
+
+function buildStyle(mode) {
+  const b = BM[mode];
+  return {
+    version: 8,
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+    sources: { basemap: { type:'raster', tiles:[b.tile], tileSize:256, attribution:b.attr } },
+    layers:  [{ id:'basemap', type:'raster', source:'basemap',
+                paint:{ 'raster-brightness-min':0,'raster-brightness-max':b.bmax,
+                        'raster-saturation':b.sat,'raster-contrast':b.con } }]
+  };
+}
+
+function setBasemap(mode) {
+  if (mode === currentBM) return;
+  currentBM = mode;
+  document.querySelectorAll('.bm-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('bm-' + mode).classList.add('active');
+
+  const center = map.getCenter();
+  const zoom   = map.getZoom();
+
+  // setStyle is the correct MapLibre API for swapping entire style (including tile source)
+  map.setStyle(buildStyle(mode));
+  map.once('style.load', () => {
+    if (hotspotsData)   upsert('hotspots',   hotspotsData);
+    if (perimetersData) upsert('perimeters', perimetersData);
+    if (aqiData)        upsert('aqi',        aqiData);
+    setupLayers();
+    map.jumpTo({ center, zoom });
+  });
+
+  document.body.classList.toggle('light-map', mode === 'light');
+}
+
+// ── AQI helpers ───────────────────────────────────────────────────────────────
+function aqiColor(v){ if(v<=50)return'#00e400';if(v<=100)return'#ffff00';if(v<=150)return'#ff7e00';if(v<=200)return'#ff0000';if(v<=300)return'#8f3f97';return'#7e0023';}
+function aqiLabel(v){ if(v<=50)return'Good';if(v<=100)return'Moderate';if(v<=150)return'Unhealthy for Sensitive Groups';if(v<=200)return'Unhealthy';if(v<=300)return'Very Unhealthy';return'Hazardous';}
+
+// ── Map init ──────────────────────────────────────────────────────────────────
+const map = new maplibregl.Map({
+  container:'map', style:buildStyle('dark'),
+  center:[-120.5,44.0], zoom:6, minZoom:4, maxZoom:18
+});
+map.addControl(new maplibregl.NavigationControl(),'bottom-right');
+map.addControl(new maplibregl.ScaleControl({unit:'imperial'}),'bottom-right');
+
+// ── Data ──────────────────────────────────────────────────────────────────────
+let hotspotsData, perimetersData, aqiData;
+async function loadAll() {
+  const [hR,pR,aR] = await Promise.all([
+    fetch(`${API}/api/hotspots`), fetch(`${API}/api/perimeters`), fetch(`${API}/api/aqi`)
+  ]);
+  hotspotsData=await hR.json(); perimetersData=await pR.json(); aqiData=await aR.json();
+}
+
+function upsert(id,data){
+  if(map.getSource(id)) map.getSource(id).setData(data);
+  else map.addSource(id,{type:'geojson',data});
+}
+
+function setupLayers(){
+  if(!map.getLayer('perimeter-fill')){
+    map.addLayer({id:'perimeter-fill',type:'fill',source:'perimeters',paint:{'fill-color':'#ff5c1a','fill-opacity':0.12}});
+    map.addLayer({id:'perimeter-line',type:'line',source:'perimeters',paint:{'line-color':'#ff8c42','line-width':1.5,'line-opacity':0.8}});
+  }
+  if(!map.getLayer('aqi-squares')){
+    map.addLayer({id:'aqi-squares',type:'circle',source:'aqi',
+      paint:{'circle-radius':10,
+        'circle-color':['interpolate',['linear'],['get','aqi'],
+          0,'#00e400',50,'#00e400',51,'#ffff00',100,'#ffff00',101,'#ff7e00',
+          150,'#ff7e00',151,'#ff0000',200,'#ff0000',201,'#8f3f97',300,'#8f3f97',301,'#7e0023'],
+        'circle-opacity':0.85,'circle-stroke-width':1.5,'circle-stroke-color':'rgba(255,255,255,0.25)'}});
+  }
+  if(!map.getLayer('hotspots-halo')){
+    map.addLayer({id:'hotspots-halo',type:'circle',source:'hotspots',
+      paint:{'circle-radius':['interpolate',['linear'],['get','frp'],0,8,10,12,50,18,150,26],
+             'circle-color':'#ff5c1a','circle-opacity':0.08,'circle-blur':1}});
+    map.addLayer({id:'hotspots-core',type:'circle',source:'hotspots',
+      paint:{'circle-radius':['interpolate',['linear'],['get','frp'],0,3,10,4.5,50,6.5,150,9],
+             'circle-color':['interpolate',['linear'],['get','frp'],0,'#ff9933',10,'#ff5c1a',50,'#ff1a1a',150,'#ffffff'],
+             'circle-opacity':0.9,'circle-stroke-width':0.5,'circle-stroke-color':'rgba(255,255,255,0.2)'}});
+  }
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+let debTimer=null, userMarker=null;
+const sInput  = document.getElementById('search-input');
+const sClear  = document.getElementById('search-clear');
+const sSugg   = document.getElementById('search-suggestions');
+const sCard   = document.getElementById('location-card');
+
+sInput.addEventListener('input',()=>{
+  const q=sInput.value.trim();
+  sClear.style.display=q?'block':'none';
+  sCard.style.display='none';
+  clearTimeout(debTimer);
+  if(q.length<2){sSugg.style.display='none';return;}
+  debTimer=setTimeout(()=>doSearch(q),340);
+});
+
+sClear.addEventListener('click',()=>{
+  sInput.value=''; sClear.style.display='none';
+  sSugg.style.display='none'; sCard.style.display='none';
+  if(userMarker){userMarker.remove();userMarker=null;}
+});
+
+document.addEventListener('click',e=>{
+  if(!document.getElementById('search-bar').contains(e.target)){sSugg.style.display='none';}
+});
+
+async function doSearch(q){
+  // Fire name matches (local, instant)
+  const fireHits=(perimetersData?.features||[])
+    .filter(f=>f.properties?.IncidentName?.toLowerCase().includes(q.toLowerCase())).slice(0,3);
+
+  // Nominatim geocode
+  let geoHits=[];
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`,
+                        {headers:{'Accept-Language':'en'}});
+    geoHits=await r.json();
+  }catch(_){}
+
+  renderSuggestions(fireHits, geoHits);
+}
+
+function renderSuggestions(fires, geo){
+  const items=[
+    ...fires.map((f,i)=>{
+      const p=f.properties; const ac=p.GISAcres?Math.round(p.GISAcres).toLocaleString()+' ac':'';
+      return `<div class="sg-item" data-type="fire" data-idx="${(perimetersData.features||[]).indexOf(f)}">
+        <span class="sg-icon">🔥</span>
+        <div><div class="sg-name">${p.IncidentName}</div><div class="sg-detail">Active fire · ${ac}</div></div></div>`;
+    }),
+    ...geo.slice(0,5).map(r=>{
+      const name=r.display_name.split(',')[0];
+      const det=r.display_name.split(',').slice(1,3).join(',').trim();
+      return `<div class="sg-item" data-type="geo" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${name}">
+        <span class="sg-icon">📍</span>
+        <div><div class="sg-name">${name}</div><div class="sg-detail">${det}</div></div></div>`;
+    })
+  ];
+  if(!items.length){sSugg.style.display='none';return;}
+  sSugg.innerHTML=items.join('');
+  sSugg.style.display='block';
+  sSugg.querySelectorAll('.sg-item').forEach(el=>{
+    el.addEventListener('click',()=>{
+      sSugg.style.display='none';
+      if(el.dataset.type==='fire'){
+        const f=perimetersData.features[+el.dataset.idx];
+        sInput.value=f.properties.IncidentName; sClear.style.display='block';
+        flyToFire(f);
+      } else {
+        const lat=parseFloat(el.dataset.lat), lon=parseFloat(el.dataset.lon), nm=el.dataset.name;
+        sInput.value=nm; sClear.style.display='block';
+        flyAndAnalyze(lat,lon,nm);
+      }
+    });
+  });
+}
+
+// Haversine km
+function hav(la1,lo1,la2,lo2){
+  const R=6371,dL=(la2-la1)*Math.PI/180,dO=(lo2-lo1)*Math.PI/180;
+  const a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dO/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function placeMarker(lat,lon){
+  if(userMarker)userMarker.remove();
+  const el=document.createElement('div'); el.className='user-dot';
+  userMarker=new maplibregl.Marker({element:el}).setLngLat([lon,lat]).addTo(map);
+}
+
+function flyToFire(f){
+  const coords=f.geometry?.coordinates; if(!coords)return;
+  const flat=coords.flat(Infinity); let lon=0,lat=0,n=0;
+  for(let i=0;i<flat.length;i+=2){lon+=flat[i];lat+=flat[i+1];n++;}
+  lon/=n; lat/=n;
+  map.flyTo({center:[lon,lat],zoom:9,duration:900});
+  placeMarker(lat,lon);
+  const p=f.properties;
+  showCard(lat,lon,p.IncidentName,
+    `Active fire · ${Math.round(p.GISAcres||0).toLocaleString()} acres · ${p.PercentContained??'?'}% contained`);
+}
+
+function flyAndAnalyze(lat,lon,label){
+  map.flyTo({center:[lon,lat],zoom:10,duration:900});
+  placeMarker(lat,lon);
+  analyzeLocation(lat,lon,label);
+}
+
+function analyzeLocation(lat,lon,label){
+  // Nearest hotspot
+  let nhDist=Infinity,nh=null;
+  for(const f of (hotspotsData?.features||[])){
+    const [flo,fla]=f.geometry.coordinates, d=hav(lat,lon,fla,flo);
+    if(d<nhDist){nhDist=d;nh=f;}
+  }
+  // Nearest fire perimeter
+  let nfDist=Infinity,nf=null;
+  for(const f of (perimetersData?.features||[])){
+    const flat=(f.geometry?.coordinates||[]).flat(Infinity);
+    for(let i=0;i<flat.length;i+=2){
+      const d=hav(lat,lon,flat[i+1],flat[i]);
+      if(d<nfDist){nfDist=d;nf=f;}
+    }
+  }
+  // Nearest AQI
+  let naDist=Infinity,na=null;
+  for(const f of (aqiData?.features||[])){
+    const [flo,fla]=f.geometry.coordinates, d=hav(lat,lon,fla,flo);
+    if(d<naDist){naDist=d;na=f;}
+  }
+
+  const risk = (nhDist<10||nfDist<5)?['risk-hi','High Risk']
+             : (nhDist<30||nfDist<20)?['risk-mid','Moderate Risk']
+             : ['risk-low','Low Risk'];
+  const aqiVal=na?.properties?.aqi??null;
+  const aqiStr=aqiVal!=null?`${aqiVal} — ${aqiLabel(aqiVal)}`:'No nearby station';
+  const aqiSty=aqiVal!=null?`background:${aqiColor(aqiVal)};color:${aqiVal<=100?'#111':'#fff'}`:'';
+
+  let html=`<div class="lc-title">📍 ${label}</div>`;
+  html+=`<div class="lc-row"><span class="lc-key">Coordinates</span><span class="lc-val">${lat.toFixed(4)}, ${lon.toFixed(4)}</span></div>`;
+  html+=`<hr class="lc-hr">`;
+  html+=`<div class="lc-row"><span class="lc-key">Fire Risk</span><span class="lc-val"><span class="lc-badge ${risk[0]}">${risk[1]}</span></span></div>`;
+  html+=`<div class="lc-row"><span class="lc-key">Nearest Hotspot</span><span class="lc-val">${nh?nhDist.toFixed(1)+' km away':'None detected'}</span></div>`;
+  html+=`<div class="lc-row"><span class="lc-key">Nearest Named Fire</span><span class="lc-val">${nf?nfDist.toFixed(1)+' km to '+nf.properties?.IncidentName:'None'}</span></div>`;
+  html+=`<hr class="lc-hr">`;
+  html+=`<div class="lc-row"><span class="lc-key">Air Quality</span><span class="lc-val">`;
+  if(aqiSty) html+=`<span class="lc-badge" style="${aqiSty}">${aqiStr}</span>`;
+  else html+=aqiStr;
+  html+=`</span></div>`;
+  showCard(lat,lon,null,null,html);
+}
+
+function showCard(lat,lon,title,subtitle,rawHtml){
+  if(rawHtml){ sCard.innerHTML=rawHtml; }
+  else {
+    let h=`<div class="lc-title">📍 ${title}</div>`;
+    h+=`<div class="lc-row"><span class="lc-key">Coordinates</span><span class="lc-val">${lat.toFixed(4)}, ${lon.toFixed(4)}</span></div>`;
+    if(subtitle) h+=`<div class="lc-row"><span class="lc-key">Info</span><span class="lc-val">${subtitle}</span></div>`;
+    sCard.innerHTML=h;
+  }
+  sCard.style.display='block';
+}
+
+// ── Live location ─────────────────────────────────────────────────────────────
+function useMyLocation(){
+  if(!navigator.geolocation){alert('Geolocation not supported by your browser.');return;}
+  const btn=document.getElementById('locate-btn');
+  btn.textContent='⟳ Locating…'; btn.classList.add('spin');
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      btn.textContent='📍 My Location'; btn.classList.remove('spin');
+      const {latitude:lat,longitude:lon}=pos.coords;
+      sInput.value='My Location'; sClear.style.display='block';
+      flyAndAnalyze(lat,lon,'My Location');
+    },
+    err=>{
+      btn.textContent='📍 My Location'; btn.classList.remove('spin');
+      const msgs={1:'Location access denied. Enable it in browser settings.',2:'Location unavailable.',3:'Location request timed out.'};
+      alert(msgs[err.code]||'Could not get your location.');
+    },
+    {timeout:10000,enableHighAccuracy:true}
+  );
+}
+
+// ── Panel collapse ─────────────────────────────────────────────────────────────
+function toggleSection(hdr){
+  const body=hdr.nextElementSibling, ch=hdr.querySelector('.section-chevron');
+  const open=!body.classList.contains('collapsed');
+  body.classList.toggle('collapsed',open); ch.classList.toggle('open',!open);
+  updateCollapseBtn();
+}
+function updateCollapseBtn(){
+  const all=[...document.querySelectorAll('.section-body')].every(b=>b.classList.contains('collapsed'));
+  document.getElementById('panel-toggle-btn').textContent=all?'Expand All':'Collapse All';
+}
+function toggleAllSections(){
+  const bs=document.querySelectorAll('.section-body'),cs=document.querySelectorAll('.section-chevron');
+  const col=[...bs].every(b=>b.classList.contains('collapsed'));
+  bs.forEach(b=>b.classList.toggle('collapsed',!col));
+  cs.forEach(c=>c.classList.toggle('open',col));
+  updateCollapseBtn();
+}
+
+// ── Fire list ─────────────────────────────────────────────────────────────────
+function buildFireList(data){
+  const features=data?.features||[];
+  document.getElementById('fire-count').textContent=`(${features.length})`;
+  document.getElementById('stat-fires').textContent=features.length;
+  const list=document.getElementById('fire-list');
+  if(!features.length){list.innerHTML='<div style="font-size:11px;color:var(--smoke)">No named perimeters</div>';return;}
+  const sorted=[...features].sort((a,b)=>(b.properties?.GISAcres||0)-(a.properties?.GISAcres||0));
+  list.innerHTML=sorted.map((f,i)=>{
+    const p=f.properties||{},nm=p.IncidentName||'Unnamed',ac=p.GISAcres?Math.round(p.GISAcres).toLocaleString():'—';
+    const pct=p.PercentContained??null;
+    let badge=pct!==null?`<span class="fire-pct ${pct>=75?'pct-low':pct>=25?'pct-mid':'pct-high'}">${pct}% CTD</span>`:'';
+    return `<div class="fire-item" data-idx="${i}"><div class="fire-name">${nm}${badge}</div><div class="fire-meta">${ac} acres</div></div>`;
+  }).join('');
+  list.querySelectorAll('.fire-item').forEach(el=>el.addEventListener('click',()=>flyToFire(sorted[+el.dataset.idx])));
+}
+
+function updateStats(){
+  document.getElementById('stat-hotspots').textContent=hotspotsData?.features?.length??0;
+  document.getElementById('stat-aqi').textContent=aqiData?.features?.length??0;
+  document.getElementById('stat-updated').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+
+// ── Popups ────────────────────────────────────────────────────────────────────
+const popup=new maplibregl.Popup({closeButton:true,offset:8,maxWidth:'250px'});
+map.on('click','hotspots-core',e=>{
+  const p=e.features[0].properties,[lon,lat]=e.features[0].geometry.coordinates;
+  popup.setLngLat([lon,lat]).setHTML(`<div class="popup-title">🔥 Fire Hotspot</div>
+    <div class="popup-row"><span class="popup-key">Coordinates</span><span class="popup-val">${lat.toFixed(3)}, ${lon.toFixed(3)}</span></div>
+    <div class="popup-row"><span class="popup-key">FRP</span><span class="popup-val">${p.frp?p.frp.toFixed(1)+' MW':'—'}</span></div>
+    <div class="popup-row"><span class="popup-key">Confidence</span><span class="popup-val">${p.confidence||'—'}</span></div>
+    <div class="popup-row"><span class="popup-key">Detected</span><span class="popup-val">${p.acq_date||'—'} ${p.acq_time||''} UTC</span></div>
+    <div class="popup-row"><span class="popup-key">Source</span><span class="popup-val">VIIRS SNPP</span></div>`).addTo(map);
+});
+map.on('click','perimeter-fill',e=>{
+  const p=e.features[0]?.properties; if(!p)return;
+  popup.setLngLat(e.lngLat).setHTML(`<div class="popup-title">🗺 ${p.IncidentName||'Unnamed Fire'}</div>
+    <div class="popup-row"><span class="popup-key">Size</span><span class="popup-val">${p.GISAcres?Math.round(p.GISAcres).toLocaleString()+' ac':'—'}</span></div>
+    <div class="popup-row"><span class="popup-key">Contained</span><span class="popup-val">${p.PercentContained!=null?p.PercentContained+'%':'—'}</span></div>
+    <div class="popup-row"><span class="popup-key">Updated</span><span class="popup-val">${p.ModifiedOnDateTime_dt?new Date(p.ModifiedOnDateTime_dt).toLocaleDateString():'—'}</span></div>
+    <div class="popup-row"><span class="popup-key">Source</span><span class="popup-val">NIFC</span></div>`).addTo(map);
+});
+map.on('click','aqi-squares',e=>{
+  const p=e.features[0].properties,aqi=p.aqi||0,col=aqiColor(aqi);
+  let rows=''; try{const pol=typeof p.pollutants==='string'?JSON.parse(p.pollutants):p.pollutants;
+    rows=Object.entries(pol).map(([n,v])=>`<div class="popup-row"><span class="popup-key">${n}</span><span class="popup-val">AQI ${v.aqi}</span></div>`).join('');}catch(_){}
+  popup.setLngLat(e.lngLat).setHTML(`<div class="popup-title">💨 ${p.city||'Station'}, ${p.state||''}</div>
+    <div class="popup-row"><span class="popup-key">Overall AQI</span><span class="popup-val">${aqi}</span></div>${rows}
+    <div><span class="aqi-badge" style="background:${col};color:${aqi<=100?'#111':'#fff'}">${aqiLabel(aqi)}</span></div>
+    <div class="popup-row" style="margin-top:6px"><span class="popup-key">Observed</span><span class="popup-val">${p.date||'—'} ${p.hour!=null?p.hour+':00':''}</span></div>`).addTo(map);
+});
+['hotspots-core','perimeter-fill','aqi-squares'].forEach(id=>{
+  map.on('mouseenter',id,()=>{map.getCanvas().style.cursor='pointer';});
+  map.on('mouseleave',id,()=>{map.getCanvas().style.cursor='';});
+});
+
+// ── Layer toggles ─────────────────────────────────────────────────────────────
+function setVis(ls,on){ls.forEach(id=>{if(map.getLayer(id))map.setLayoutProperty(id,'visibility',on?'visible':'none');});}
+document.getElementById('tog-hotspots').addEventListener('change',  e=>setVis(['hotspots-halo','hotspots-core'],e.target.checked));
+document.getElementById('tog-perimeters').addEventListener('change', e=>setVis(['perimeter-fill','perimeter-line'],e.target.checked));
+document.getElementById('tog-aqi').addEventListener('change',        e=>setVis(['aqi-squares'],e.target.checked));
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+map.on('load',async()=>{
+  try{
+    await loadAll();
+    upsert('hotspots',hotspotsData); upsert('perimeters',perimetersData); upsert('aqi',aqiData);
+    setupLayers(); buildFireList(perimetersData); updateStats();
+    const ov=document.getElementById('loading');
+    ov.style.opacity='0'; setTimeout(()=>ov.remove(),500);
+    setInterval(async()=>{
+      await loadAll();
+      upsert('hotspots',hotspotsData); upsert('perimeters',perimetersData); upsert('aqi',aqiData);
+      buildFireList(perimetersData); updateStats();
+    },REFRESH_MS);
+  }catch(err){
+    document.querySelector('.loading-text').textContent='FETCH ERROR';
+    document.querySelector('.loading-sub').textContent=err.message;
+  }
+});
+</script>
+</body>
+</html>
